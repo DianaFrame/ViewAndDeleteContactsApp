@@ -1,4 +1,4 @@
-package com.example.viewanddeletecontactsapp
+package com.example.viewanddeletecontactsapp.activity
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

@@ -21,3 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ViewAndDeleteContactsApp"
 include(":app")
+include(":data")
+include(":domain")
