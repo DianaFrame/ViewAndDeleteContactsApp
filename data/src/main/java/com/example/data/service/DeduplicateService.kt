@@ -1,15 +1,15 @@
 package com.example.data.service
 
 import android.app.Service
+import android.content.ContentResolver
 import android.content.Intent
 import android.os.IBinder
 import android.os.RemoteException
+import android.provider.ContactsContract
 import android.util.Log
-import com.example.domain.repository.ContactsRepository
 import kotlinx.coroutines.runBlocking
 
-class DeduplicateService(
-    private val repository: ContactsRepository) : Service() {
+class DeduplicateService: Service() {
 
     private var currentProgress = 0
     private var isRunning = false
@@ -23,7 +23,7 @@ class DeduplicateService(
                 isRunning = true
                 currentProgress = 0
                 runBlocking {
-                    repository.deduplicate()
+                    deleteDuplicates()
                     isRunning = false
                 }
                 0
@@ -41,4 +41,63 @@ class DeduplicateService(
     }
 
     override fun onBind(p0: Intent?): IBinder = binder
+
+    private fun deleteDuplicates() {
+        val resolver: ContentResolver = contentResolver
+        val contactsMap = mutableMapOf<String, MutableList<Long>>()
+
+        val cursor = resolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(
+                ContactsContract.CommonDataKinds.Phone._ID,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+            ),
+            null,
+            null,
+            null
+        )
+
+        cursor?.use {
+            val idIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone._ID)
+            val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+
+            while (it.moveToNext()) {
+                val id = it.getLong(idIndex)
+                val name = it.getString(nameIndex) ?: ""
+                val number = it.getString(numberIndex) ?: ""
+
+                val key = "$name|$number"
+                if (!contactsMap.containsKey(key)) {
+                    contactsMap[key] = mutableListOf()
+                }
+                contactsMap[key]?.add(id)
+
+                currentProgress = (it.position * 100 / it.count)
+            }
+        }
+
+        var deletedCount = 0
+        contactsMap.values.forEach { ids ->
+            if (ids.size > 1) {
+                for (i in 1 until ids.size) {
+                    val deleteUri = ContactsContract.RawContacts.CONTENT_URI
+                        .buildUpon()
+                        .appendQueryParameter(
+                            ContactsContract.CALLER_IS_SYNCADAPTER, "true"
+                        )
+                        .build()
+
+                    val where = "${ContactsContract.RawContacts._ID} = ?"
+                    val selectionArgs = arrayOf(ids[i].toString())
+
+                    resolver.delete(deleteUri, where, selectionArgs)
+                    deletedCount++
+                    currentProgress = 50 + (deletedCount * 50 / (contactsMap.size))
+                }
+            }
+        }
+        currentProgress = 100
+    }
 }
